@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { Plus, Trash2, Edit2, Volume2, VolumeX, Sparkles, Sliders, Bell } from 'lucide-react'
 import type { Activity, Category, RandomizerMode, UserSettings } from '../../types'
 import { requestNotificationPermission } from '../../lib/notifications'
+import { InstallPromptModal } from '../ui/InstallPromptModal'
+
 
 interface SettingsViewProps {
   activities: Activity[]
@@ -67,10 +69,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   return (
     <div className="flex flex-col min-h-[calc(100vh-80px)] px-5 py-6 max-w-md mx-auto w-full pb-24">
       {/* Title */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-black tracking-tight text-white">RÉGLAGES</h1>
-        <p className="text-xs text-zinc-500">Moteur de sélection et activités</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-white">RÉGLAGES</h1>
+          <p className="text-xs text-zinc-500">Moteur de sélection et activités</p>
+        </div>
+        <InstallPromptModal />
       </div>
+
 
       {/* Randomizer Mode Section */}
       <div className="mb-6 bg-[#0f1118] border border-[#1b1e2c] p-4 rounded-3xl">
