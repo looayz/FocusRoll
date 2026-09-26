@@ -53,6 +53,15 @@ export function App() {
     setIsSpinning(true)
   }
 
+  // Action: Manual Activity Selection
+  const handleManualSelectActivity = (act: Activity) => {
+    setSelectedActivity(act)
+    const dur = computeActivityDuration(act)
+    setCalculatedDuration(dur)
+    setIsSpinning(false)
+  }
+
+
   // Action: Spin completes
   const handleSpinDone = () => {
     setIsSpinning(false)
@@ -193,6 +202,7 @@ export function App() {
               <HomeView
                 activities={activities}
                 onRoll={handleRoll}
+                onManualSelectActivity={handleManualSelectActivity}
                 isSpinning={isSpinning}
                 selectedActivity={selectedActivity}
                 calculatedDuration={calculatedDuration}
@@ -206,6 +216,7 @@ export function App() {
                 lastSession={sessions[0]}
               />
             )}
+
 
             {tab === 'history' && <HistoryView sessions={sessions} />}
 
