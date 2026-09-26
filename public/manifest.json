@@ -1,0 +1,18 @@
+{
+  "name": "FOCUSROLL — Productivity Randomizer",
+  "short_name": "FOCUSROLL",
+  "description": "You don't decide. You focus. Roulette de productivité aléatoire et sans distraction.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
