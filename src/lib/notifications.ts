@@ -17,8 +17,8 @@ export async function notifySessionComplete(activityName: string, durationMinute
   const title = 'FOCUSROLL — Session terminée ! 🎉'
   const options: NotificationOptions = {
     body: `Bravo, ${durationMinutes} min de : ${activityName}.`,
-    icon: '/pwa-192x192.png',
-    badge: '/pwa-192x192.png',
+    icon: `${import.meta.env.BASE_URL}pwa-192x192.png`,
+    badge: `${import.meta.env.BASE_URL}pwa-192x192.png`,
     tag: 'focusroll-session-done',
   }
   try {
