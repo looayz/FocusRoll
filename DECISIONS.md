@@ -20,3 +20,15 @@
 5. **PWA Standalone & Desktop / Mobile First**
    - Layout vertical élégant centré en widget compact sur desktop (max 480px) et plein écran responsive sur smartphone.
    - Manifest PWA avec icônes SVG haute résolution, orientation portrait, raccourcis et couleurs thème noir absolu `#090a0f`.
+
+6. **Minuteur par horodatage, session persistée (localStorage)**
+   - `startedAt` + temps de pause cumulé ; le reste est dérivé de l'horloge. Un `setInterval` décrémental dérive dès que l'onglet est throttlé (téléphone verrouillé).
+   - La session survit à un rechargement ; une session terminée pendant l'absence propose de la valider ou de l'ignorer.
+   - Sous 30 s un abandon n'est pas enregistré ; "Terminer maintenant" n'est possible qu'après 1 min (évite les séries "à 1 seconde").
+
+7. **Service worker généré par vite-plugin-pwa (Workbox)**
+   - Précache des fichiers hashés + `autoUpdate`. Un SW manuel cache-first sur `index.html` figeait l'app sur d'anciens bundles.
+
+8. **Balanced = catégorie d'abord, puis activité**
+   - Évite qu'une catégorie contenant plus d'activités soit tirée plus souvent (le mode promettait un équilibre entre les catégories).
+

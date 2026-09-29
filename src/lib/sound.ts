@@ -3,6 +3,8 @@ class SoundController {
 
   private getContext(): AudioContext | null {
     if (typeof window === 'undefined') return null
+    // Le navigateur refuse de démarrer l'audio avant un geste utilisateur (ex. après un rechargement)
+    if (!this.ctx && navigator.userActivation && !navigator.userActivation.hasBeenActive) return null
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
       if (AudioCtx) {

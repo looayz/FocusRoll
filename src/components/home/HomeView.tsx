@@ -1,54 +1,60 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Dice5, Play, Sparkles, Clock, CheckCircle2, ChevronDown } from 'lucide-react'
+import { Dice5, Play, Sparkles, Clock, CheckCircle2, XCircle, FastForward, ChevronDown, Target } from 'lucide-react'
 
 import type { Activity, Session } from '../../types'
 import { Roulette } from '../roulette/Roulette'
 
 interface HomeViewProps {
-  activities: Activity[]
+  /** Activités actives (mémoïsées par le parent : leur identité pilote la roulette). */
+  activeActivities: Activity[]
+  hasActivities: boolean
   onRoll: () => void
   onManualSelectActivity: (activity: Activity) => void
   isSpinning: boolean
   selectedActivity: Activity | null
-  calculatedDuration: number
+  duration: number
+  onDurationChange: (minutes: number) => void
   onStartFocus: (durationMinutes: number) => void
-  onSkipAndReroll: () => void
+  onReroll: () => void
   onSpinDone: () => void
   soundEnabled: boolean
   noChoiceMode: boolean
   todayMinutes: number
   todaySessionsCount: number
+  dailyGoalMinutes: number
   lastSession?: Session
+  onGoToSettings: () => void
 }
 
+const PRESET_DURATIONS = [15, 25, 30, 45, 60]
 
 export const HomeView: React.FC<HomeViewProps> = ({
-  activities,
+  activeActivities,
+  hasActivities,
   onRoll,
   onManualSelectActivity,
   isSpinning,
   selectedActivity,
-  calculatedDuration,
+  duration,
+  onDurationChange,
   onStartFocus,
-  onSkipAndReroll,
+  onReroll,
   onSpinDone,
   soundEnabled,
   noChoiceMode,
   todayMinutes,
   todaySessionsCount,
+  dailyGoalMinutes,
   lastSession,
+  onGoToSettings,
 }) => {
-  const [customDuration, setCustomDuration] = useState<number | null>(null)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
-  const durationToUse = customDuration || calculatedDuration
-
-  const presetDurations = [15, 25, 30, 45, 60]
-  const activeActivities = activities.filter((a) => a.active)
+  const goalReached = dailyGoalMinutes > 0 && todayMinutes >= dailyGoalMinutes
+  const idle = !selectedActivity && !isSpinning
 
   return (
-    <div className="flex flex-col items-center justify-between min-h-[calc(100vh-80px)] px-5 py-6 max-w-md mx-auto text-center">
-      {/* Top Header / Clock */}
+    <div className="flex flex-col items-center justify-between min-h-[calc(100dvh-5rem)] px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-28 max-w-md mx-auto text-center">
       <div className="w-full flex items-center justify-between text-zinc-500 text-xs font-medium tracking-wider">
         <span>FOCUSROLL</span>
         {noChoiceMode ? (
@@ -56,99 +62,107 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <Sparkles className="w-3 h-3" /> NO CHOICE
           </span>
         ) : (
-          <span>{todaySessionsCount} sessions · {todayMinutes} min</span>
+          <span>
+            {todaySessionsCount} session{todaySessionsCount > 1 ? 's' : ''} · {todayMinutes} min
+          </span>
         )}
       </div>
 
-      {/* Hero / State Area */}
-      <div className="my-auto w-full flex flex-col items-center">
-        {!selectedActivity && !isSpinning && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center w-full"
-          >
-            <span className="text-zinc-500 uppercase tracking-widest text-xs font-semibold mb-2">
-              Next Step
-            </span>
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-6">
-              WHAT'S NEXT?
-            </h1>
+      <div className="my-auto w-full flex flex-col items-center py-6">
+        {idle && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center w-full">
+            <span className="text-zinc-500 uppercase tracking-widest text-xs font-semibold mb-2">Prochaine étape</span>
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-6">ET MAINTENANT ?</h1>
 
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onRoll}
-              className="group relative flex items-center justify-center gap-3 px-8 py-5 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white font-bold text-lg shadow-xl shadow-indigo-500/20 border border-indigo-400/30 overflow-hidden cursor-pointer w-full max-w-xs"
-            >
-              <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <Dice5 className="w-6 h-6 animate-spin-slow" />
-              <span>ROLL ACTIVITY</span>
-            </motion.button>
-
-            {/* Manual Activity Selector */}
-            {!noChoiceMode && activeActivities.length > 0 && (
-              <div className="mt-4 w-full max-w-xs relative">
-                <button
-                  onClick={() => setIsPickerOpen(!isPickerOpen)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-[#0f111a] border border-[#1d2030] text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-all cursor-pointer"
-                >
-                  <span className="truncate">Ou choisir directement une activité...</span>
-                  <ChevronDown className={`w-3.5 h-3.5 ml-2 transition-transform ${isPickerOpen ? 'rotate-180' : ''}`} />
+            {hasActivities && activeActivities.length === 0 ? (
+              <div className="w-full max-w-xs rounded-3xl bg-[#0f1118] border border-[#1f2233] p-5">
+                <p className="text-sm text-zinc-300 mb-1 font-semibold">Aucune activité active</p>
+                <p className="text-xs text-zinc-500 mb-4">Active au moins une activité pour lancer la roulette.</p>
+                <button onClick={onGoToSettings} className="px-4 py-2.5 rounded-xl bg-white text-black text-xs font-bold cursor-pointer">
+                  Ouvrir les réglages
                 </button>
-
-                <AnimatePresence>
-                  {isPickerOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
-                      className="absolute left-0 right-0 top-12 z-30 bg-[#0e1017] border border-[#22273c] rounded-2xl p-2 shadow-2xl max-h-56 overflow-y-auto space-y-1 text-left"
-                    >
-                      {activeActivities.map((act) => (
-                        <button
-                          key={act.id}
-                          onClick={() => {
-                            onManualSelectActivity(act)
-                            setIsPickerOpen(false)
-                          }}
-                          className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-[#181c2b] text-xs text-zinc-300 transition-all cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2.5 truncate">
-                            <span className="text-base">{act.icon}</span>
-                            <span className="font-medium text-white truncate">{act.name}</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-500 font-mono">
-                            {act.defaultDurationMinutes}m
-                          </span>
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
+            ) : !hasActivities ? (
+              <div className="w-full max-w-xs rounded-3xl bg-[#0f1118] border border-[#1f2233] p-5">
+                <p className="text-sm text-zinc-300 mb-1 font-semibold">Aucune activité</p>
+                <p className="text-xs text-zinc-500 mb-4">Crée ta première activité pour commencer.</p>
+                <button onClick={onGoToSettings} className="px-4 py-2.5 rounded-xl bg-white text-black text-xs font-bold cursor-pointer">
+                  Créer une activité
+                </button>
+              </div>
+            ) : (
+              <>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onRoll}
+                  className="group relative flex items-center justify-center gap-3 px-8 py-5 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white font-bold text-lg shadow-xl shadow-indigo-500/20 border border-indigo-400/30 overflow-hidden cursor-pointer w-full max-w-xs"
+                >
+                  <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <Dice5 className="w-6 h-6" />
+                  <span>LANCER LE ROLL</span>
+                </motion.button>
+
+                {!noChoiceMode && (
+                  <div className="mt-4 w-full max-w-xs relative">
+                    <button
+                      onClick={() => setIsPickerOpen(!isPickerOpen)}
+                      aria-expanded={isPickerOpen}
+                      className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-[#0f111a] border border-[#1d2030] text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition-all cursor-pointer"
+                    >
+                      <span className="truncate">Ou choisir directement une activité...</span>
+                      <ChevronDown className={`w-3.5 h-3.5 ml-2 transition-transform ${isPickerOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {isPickerOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          className="absolute left-0 right-0 top-14 z-30 bg-[#0e1017] border border-[#22273c] rounded-2xl p-2 shadow-2xl max-h-56 overflow-y-auto space-y-1 text-left"
+                        >
+                          {activeActivities.map((act) => (
+                            <button
+                              key={act.id}
+                              onClick={() => {
+                                onManualSelectActivity(act)
+                                setIsPickerOpen(false)
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-[#181c2b] text-xs text-zinc-300 transition-all cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2.5 truncate">
+                                <span className="text-base">{act.icon}</span>
+                                <span className="font-medium text-white truncate">{act.name}</span>
+                              </div>
+                              <span className="text-[10px] text-zinc-500 font-mono shrink-0 ml-2">
+                                {act.durationMode === 'range' && act.rangeMinMinutes && act.rangeMaxMinutes
+                                  ? `${act.rangeMinMinutes}-${act.rangeMaxMinutes}m`
+                                  : `${act.defaultDurationMinutes}m`}
+                              </span>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+              </>
             )}
           </motion.div>
         )}
 
-
-        {(isSpinning || (selectedActivity && isSpinning)) && selectedActivity && (
+        {isSpinning && selectedActivity && (
           <Roulette
-            activities={activities}
+            activities={activeActivities}
             targetActivity={selectedActivity}
-            isSpinning={isSpinning}
             onComplete={onSpinDone}
             soundEnabled={soundEnabled}
           />
         )}
 
         {selectedActivity && !isSpinning && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full flex flex-col items-center"
-          >
-            {/* Selected Card */}
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full flex flex-col items-center">
             <div className="w-full max-w-xs rounded-3xl bg-[#0f1118] border border-[#1f2233] p-6 shadow-2xl relative overflow-hidden mb-6">
               <div
                 className="absolute -top-16 -right-16 w-36 h-36 rounded-full blur-3xl opacity-20 pointer-events-none"
@@ -156,27 +170,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
               />
 
               <div className="text-5xl mb-3">{selectedActivity.icon}</div>
-              <h2 className="text-2xl font-bold text-white tracking-tight">
-                {selectedActivity.name}
-              </h2>
+              <h2 className="text-2xl font-bold text-white tracking-tight">{selectedActivity.name}</h2>
 
               <div className="mt-4 flex items-center justify-center gap-2">
                 <Clock className="w-4 h-4 text-zinc-400" />
-                <span className="text-lg font-semibold text-zinc-200">
-                  {durationToUse} MIN
-                </span>
+                <span className="text-lg font-semibold text-zinc-200">{duration} MIN</span>
               </div>
 
-              {/* Quick duration presets */}
               <div className="flex justify-center gap-1.5 mt-4 pt-3 border-t border-zinc-800/60">
-                {presetDurations.map((dur) => (
+                {PRESET_DURATIONS.map((dur) => (
                   <button
                     key={dur}
-                    onClick={() => setCustomDuration(dur)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      durationToUse === dur
-                        ? 'bg-white text-black font-bold'
-                        : 'bg-zinc-800/60 text-zinc-400 hover:text-zinc-200'
+                    onClick={() => onDurationChange(dur)}
+                    aria-pressed={duration === dur}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                      duration === dur ? 'bg-white text-black font-bold' : 'bg-zinc-800/60 text-zinc-400 hover:text-zinc-200'
                     }`}
                   >
                     {dur}m
@@ -185,23 +193,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </div>
 
-            {/* Actions */}
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => onStartFocus(durationToUse)}
+                onClick={() => onStartFocus(duration)}
                 className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-white text-black font-bold text-base shadow-lg hover:bg-zinc-100 transition-all cursor-pointer"
               >
                 <Play className="w-5 h-5 fill-black" />
-                <span>START FOCUS</span>
+                <span>DÉMARRER LE FOCUS</span>
               </motion.button>
 
               {!noChoiceMode && (
-                <button
-                  onClick={onSkipAndReroll}
-                  className="text-xs text-zinc-500 hover:text-zinc-300 py-1 transition-colors"
-                >
+                <button onClick={onReroll} className="text-xs text-zinc-500 hover:text-zinc-300 py-2 transition-colors cursor-pointer">
                   Relancer la roulette
                 </button>
               )}
@@ -210,17 +214,47 @@ export const HomeView: React.FC<HomeViewProps> = ({
         )}
       </div>
 
-      {/* Bottom Summary widget */}
-      {!selectedActivity && !isSpinning && lastSession && (
-        <div className="w-full max-w-xs rounded-2xl bg-[#0f1118]/70 border border-[#1c1f2e] p-3 text-left flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">{lastSession.activityIcon}</span>
-            <div>
-              <p className="text-xs font-semibold text-zinc-300">Dernière session</p>
-              <p className="text-[11px] text-zinc-500">{lastSession.activityName} · {Math.round(lastSession.actualDurationSeconds / 60)} min</p>
+      {idle && (
+        <div className="w-full max-w-xs space-y-2.5">
+          {dailyGoalMinutes > 0 && (
+            <div className="rounded-2xl bg-[#0f1118]/70 border border-[#1c1f2e] p-3 text-left">
+              <div className="flex items-center justify-between text-[11px] mb-2">
+                <span className="flex items-center gap-1.5 font-semibold text-zinc-300">
+                  <Target className={`w-3.5 h-3.5 ${goalReached ? 'text-emerald-400' : 'text-blue-400'}`} />
+                  {goalReached ? 'Objectif du jour atteint !' : 'Objectif du jour'}
+                </span>
+                <span className="text-zinc-500 font-mono">
+                  {todayMinutes} / {dailyGoalMinutes} min
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden" role="progressbar" aria-valuenow={todayMinutes} aria-valuemax={dailyGoalMinutes}>
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${goalReached ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                  style={{ width: `${Math.min(100, (todayMinutes / dailyGoalMinutes) * 100)}%` }}
+                />
+              </div>
             </div>
-          </div>
-          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+          )}
+
+          {lastSession && (
+            <div className="rounded-2xl bg-[#0f1118]/70 border border-[#1c1f2e] p-3 text-left flex items-center justify-between">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-xl">{lastSession.activityIcon}</span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-zinc-300">Dernière session</p>
+                  <p className="text-[11px] text-zinc-500 truncate">
+                    {lastSession.activityName} ·{' '}
+                    {lastSession.status === 'skipped'
+                      ? 'passée'
+                      : `${Math.max(1, Math.round(lastSession.actualDurationSeconds / 60))} min${lastSession.status === 'abandoned' ? ' (abandonnée)' : ''}`}
+                  </p>
+                </div>
+              </div>
+              {lastSession.status === 'completed' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
+              {lastSession.status === 'abandoned' && <XCircle className="w-4 h-4 text-rose-500/80 shrink-0" />}
+              {lastSession.status === 'skipped' && <FastForward className="w-4 h-4 text-zinc-600 shrink-0" />}
+            </div>
+          )}
         </div>
       )}
     </div>

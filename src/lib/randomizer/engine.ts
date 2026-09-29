@@ -1,92 +1,91 @@
 import type { Activity, RandomizerMode, Session } from '../../types'
 
-export function computeActivityDuration(activity: Activity): number {
-  if (activity.durationMode === 'fixed') {
-    return activity.defaultDurationMinutes
-  }
+export type Rng = () => number
+
+export interface PickOptions {
+  /** Activité à ne pas retirer (ex. celle qu'on vient de passer ou de relancer). */
+  excludeId?: string
+  rng?: Rng
+}
+
+const MIN_STEP = 5
+
+export function computeActivityDuration(activity: Activity, rng: Rng = Math.random): number {
   if (activity.durationMode === 'range' && activity.rangeMinMinutes && activity.rangeMaxMinutes) {
     const min = Math.min(activity.rangeMinMinutes, activity.rangeMaxMinutes)
     const max = Math.max(activity.rangeMinMinutes, activity.rangeMaxMinutes)
-    // Pas de 5 minutes
-    const step = 5
-    const stepsCount = Math.floor((max - min) / step)
-    const randomStep = Math.floor(Math.random() * (stepsCount + 1))
-    return min + randomStep * step
+    const stepsCount = Math.floor((max - min) / MIN_STEP)
+    return min + Math.floor(rng() * (stepsCount + 1)) * MIN_STEP
   }
   return activity.defaultDurationMinutes || 25
 }
 
+function clampWeight(a: Activity): number {
+  return Math.min(5, Math.max(1, a.weight || 3))
+}
+
 export function pickNextActivity(
   activities: Activity[],
-  recentSessions: Session[],
-  mode: RandomizerMode
+  sessions: Session[],
+  mode: RandomizerMode,
+  { excludeId, rng = Math.random }: PickOptions = {}
 ): Activity | null {
-  const activePool = activities.filter((a) => a.active)
-  if (activePool.length === 0) return null
-  if (activePool.length === 1) return activePool[0]
+  let pool = activities.filter((a) => a.active)
+  if (pool.length === 0) return null
+  if (pool.length > 1 && excludeId) {
+    pool = pool.filter((a) => a.id !== excludeId)
+  }
+  if (pool.length === 1) return pool[0]
+
+  // Seules les sessions réellement pratiquées comptent pour l'historique récent
+  // (une activité passée n'a pas été "faite"), triées de la plus récente à la plus ancienne.
+  const practiced = sessions
+    .filter((s) => s.status !== 'skipped')
+    .sort((a, b) => b.startedAt - a.startedAt)
 
   if (mode === 'pure') {
-    const randomIndex = Math.floor(Math.random() * activePool.length)
-    return activePool[randomIndex]
-  }
-
-  if (mode === 'smart') {
-    // Mode Smart : pondération par poids (1-5) et pénalisation si apparu récemment
-    // Récupérer les 5 dernières sessions terminées ou entamées
-    const recent = recentSessions.slice(0, 5)
-    
-    const weightedPool: { activity: Activity; weight: number }[] = activePool.map((act) => {
-      let w = Math.max(1, act.weight || 3) * 10
-
-      // Pénalité pour répétition immédiate
-      const lastSession = recent[0]
-      if (lastSession && lastSession.activityId === act.id) {
-        w *= 0.2 // Division drastique de la probabilité si fait juste avant
-      } else {
-        const countInRecent = recent.filter((s) => s.activityId === act.id).length
-        if (countInRecent >= 2) {
-          w *= 0.4
-        } else if (countInRecent === 1) {
-          w *= 0.7
-        }
-      }
-
-      return { activity: act, weight: Math.max(1, w) }
-    })
-
-    return weightedRandom(weightedPool)
+    return pool[Math.floor(rng() * pool.length)]
   }
 
   if (mode === 'balanced') {
-    // Mode Balanced : Répartir entre catégories
-    // Analyser quelles catégories ont été le moins pratiquées récemment
-    const categoryCount: Record<string, number> = {}
-    recentSessions.slice(0, 10).forEach((s) => {
-      categoryCount[s.categoryId] = (categoryCount[s.categoryId] || 0) + 1
-    })
+    // 1) choisir une catégorie (les plus délaissées récemment sont favorisées),
+    // 2) puis une activité de cette catégorie selon son poids.
+    // Une catégorie n'a ainsi pas plus de chances simplement parce qu'elle contient plus d'activités.
+    const recent = practiced.slice(0, 10)
+    const byCategory = new Map<string, Activity[]>()
+    for (const a of pool) byCategory.set(a.categoryId, [...(byCategory.get(a.categoryId) ?? []), a])
 
-    const weightedPool = activePool.map((act) => {
-      const occurrences = categoryCount[act.categoryId] || 0
-      // Plus la catégorie est délaissée, plus son score est élevé
-      const categoryBonus = Math.max(1, 10 - occurrences * 2.5)
-      const baseWeight = Math.max(1, act.weight || 3)
-      return { activity: act, weight: baseWeight * categoryBonus }
+    const categoryPool = [...byCategory.keys()].map((categoryId) => {
+      const occurrences = recent.filter((s) => s.categoryId === categoryId).length
+      return { item: categoryId, weight: Math.max(1, 10 - occurrences * 2.5) }
     })
-
-    return weightedRandom(weightedPool)
+    const categoryId = weightedRandom(categoryPool, rng)
+    const inCategory = (byCategory.get(categoryId) ?? pool).map((a) => ({ item: a, weight: clampWeight(a) }))
+    return weightedRandom(inCategory, rng)
   }
 
-  return activePool[0]
+  // smart : poids configuré (1-5) + pénalité de répétition sur les 5 dernières sessions
+  const recent = practiced.slice(0, 5)
+  const weighted = pool.map((a) => {
+    let w = clampWeight(a) * 10
+    if (recent[0]?.activityId === a.id) {
+      w *= 0.2
+    } else {
+      const count = recent.filter((s) => s.activityId === a.id).length
+      if (count >= 2) w *= 0.4
+      else if (count === 1) w *= 0.7
+    }
+    return { item: a, weight: Math.max(1, w) }
+  })
+  return weightedRandom(weighted, rng)
 }
 
-function weightedRandom(pool: { activity: Activity; weight: number }[]): Activity {
-  const totalWeight = pool.reduce((sum, item) => sum + item.weight, 0)
-  let randomVal = Math.random() * totalWeight
-  for (const item of pool) {
-    if (randomVal < item.weight) {
-      return item.activity
-    }
-    randomVal -= item.weight
+function weightedRandom<T>(pool: { item: T; weight: number }[], rng: Rng): T {
+  const total = pool.reduce((sum, p) => sum + p.weight, 0)
+  let r = rng() * total
+  for (const p of pool) {
+    if (r < p.weight) return p.item
+    r -= p.weight
   }
-  return pool[pool.length - 1].activity
+  return pool[pool.length - 1].item
 }
