@@ -1,6 +1,7 @@
 {
   "name": "FOCUSROLL — Productivity Randomizer",
   "short_name": "FOCUSROLL",
+  "lang": "fr",
   "description": "You don't decide. You focus. Roulette de productivité aléatoire et sans distraction.",
   "start_url": "/",
   "display": "standalone",
@@ -22,7 +23,7 @@
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ],
   "shortcuts": [

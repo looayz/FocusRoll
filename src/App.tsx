@@ -1,246 +1,302 @@
-import { useEffect, useState } from 'react'
-import { db, initializeDatabase, DEFAULT_SETTINGS } from './lib/storage/db'
-import type { Activity, Category, Session, SessionMood, UserSettings } from './types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { db, initializeDatabase, withSettingsDefaults, DEFAULT_SETTINGS } from './lib/storage/db'
+import type { ActiveSession, Activity, Category, Session, SessionMood, SessionStatus, UserSettings } from './types'
 import { pickNextActivity, computeActivityDuration } from './lib/randomizer/engine'
-import { computeStats } from './lib/statistics/calculator'
-import { notifySessionComplete } from './lib/notifications'
+import { computeStats, dayKey } from './lib/statistics/calculator'
+import { loadActiveSession, newActiveSession, saveActiveSession } from './lib/activeSession'
 import { Navigation, type NavTab } from './components/navigation/Navigation'
 import { HomeView } from './components/home/HomeView'
-import { FocusView } from './components/focus/FocusView'
+import { FocusView, MIN_ABANDON_RECORD_SECONDS } from './components/focus/FocusView'
 import { HistoryView } from './components/history/HistoryView'
 import { SettingsView } from './components/settings/SettingsView'
 
+interface LoadedData {
+  activities: Activity[]
+  sessions: Session[]
+  settings: UserSettings
+}
+
 export function App() {
   const [tab, setTab] = useState<NavTab>('home')
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [activities, setActivities] = useState<Activity[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS)
+  const [today, setToday] = useState(() => dayKey(Date.now()))
 
-  // Roulette & Focus states
+  // Roulette
   const [isSpinning, setIsSpinning] = useState(false)
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null)
-  const [calculatedDuration, setCalculatedDuration] = useState<number>(25)
-  const [isFocusActive, setIsFocusActive] = useState(false)
-  const [activeSessionDuration, setActiveSessionDuration] = useState<number>(25)
+  const [duration, setDuration] = useState(25)
 
-  // Initialize DB and load data
-  const loadData = async () => {
+  // Session en cours, restaurée après un rechargement / une fermeture de l'app
+  const [active, setActive] = useState<ActiveSession | null>(loadActiveSession)
+
+  const activeActivities = useMemo(() => activities.filter((a) => a.active), [activities])
+
+  const loadData = useCallback(async (): Promise<LoadedData> => {
     await initializeDatabase()
-    const acts = await db.activities.toArray()
-    const cats = await db.categories.toArray()
-    const sess = await db.sessions.reverse().sortBy('startedAt')
-    const userSettings = await db.settings.get(DEFAULT_SETTINGS.id)
-
+    const [acts, cats, sess, userSettings] = await Promise.all([
+      db.activities.toArray(),
+      db.categories.toArray(),
+      db.sessions.orderBy('startedAt').reverse().toArray(),
+      db.settings.get(DEFAULT_SETTINGS.id),
+    ])
     setActivities(acts)
     setCategories(cats)
     setSessions(sess)
-    if (userSettings) setSettings(userSettings)
-  }
-
-  useEffect(() => {
-    loadData()
+    const merged = withSettingsDefaults(userSettings)
+    setSettings(merged)
+    return { activities: acts, sessions: sess, settings: merged }
   }, [])
 
-  // Action: Launch Roll
-  const handleRoll = () => {
-    const next = pickNextActivity(activities, sessions, settings.randomizerMode)
-    if (!next) return
+  const rollFrom = useCallback(
+    (acts: Activity[], sess: Session[], mode: UserSettings['randomizerMode'], excludeId?: string) => {
+      const next = pickNextActivity(acts, sess, mode, { excludeId })
+      if (!next) return
+      setSelectedActivity(next)
+      setDuration(computeActivityDuration(next))
+      setIsSpinning(true)
+    },
+    [],
+  )
 
-    setSelectedActivity(next)
-    const dur = computeActivityDuration(next)
-    setCalculatedDuration(dur)
-    setIsSpinning(true)
-  }
+  const shortcutHandled = useRef(false)
+  useEffect(() => {
+    loadData()
+      .then((data) => {
+        setLoaded(true)
+        // Raccourci PWA "Lancer un Roll" (manifest : /?action=roll)
+        const params = new URLSearchParams(window.location.search)
+        if (params.get('action') === 'roll' && !shortcutHandled.current) {
+          shortcutHandled.current = true
+          window.history.replaceState(null, '', window.location.pathname)
+          if (!loadActiveSession()) rollFrom(data.activities, data.sessions, data.settings.randomizerMode)
+        }
+      })
+      .catch(() => setLoadError(true))
+    // Demande au navigateur de ne pas purger les données locales (historique = précieux)
+    void navigator.storage?.persist?.()
+  }, [loadData, rollFrom])
 
-  // Action: Manual Activity Selection
+  // Recalcule les stats "du jour" si l'app reste ouverte au-delà de minuit
+  useEffect(() => {
+    const onVisible = () => document.visibilityState === 'visible' && setToday(dayKey(Date.now()))
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const stats = useMemo(() => computeStats(sessions), [sessions, today])
+
+  const handleRoll = () => rollFrom(activities, sessions, settings.randomizerMode)
+  const handleReroll = () => rollFrom(activities, sessions, settings.randomizerMode, selectedActivity?.id)
+
   const handleManualSelectActivity = (act: Activity) => {
     setSelectedActivity(act)
-    const dur = computeActivityDuration(act)
-    setCalculatedDuration(dur)
+    setDuration(computeActivityDuration(act))
     setIsSpinning(false)
   }
 
+  const updateActive = useCallback((next: ActiveSession | null) => {
+    setActive(next)
+    saveActiveSession(next)
+  }, [])
 
-  // Action: Spin completes
+  const handleStartFocus = (durationMinutes: number) => {
+    if (!selectedActivity) return
+    updateActive(newActiveSession(selectedActivity, durationMinutes))
+    setSelectedActivity(null)
+    setIsSpinning(false)
+  }
+
   const handleSpinDone = () => {
     setIsSpinning(false)
-    if (settings.noChoiceMode && selectedActivity) {
-      // Auto start focus directly in No Choice mode
-      handleStartFocus(calculatedDuration)
+    // Mode No Choice : on enchaîne directement sur le focus
+    if (settings.noChoiceMode && selectedActivity) handleStartFocus(duration)
+  }
+
+  const recordSession = async (
+    session: ActiveSession,
+    status: SessionStatus,
+    extra: { elapsedSeconds: number; mood?: SessionMood; skipReason?: string },
+  ) => {
+    const { activity } = session
+    const endedAt = session.finishedAt ?? Date.now()
+    const entry: Session = {
+      id: crypto.randomUUID(),
+      activityId: activity.id,
+      activityName: activity.name,
+      activityIcon: activity.icon,
+      activityColor: activity.accentColor,
+      categoryId: activity.categoryId,
+      plannedDurationMinutes: session.durationMinutes,
+      actualDurationSeconds: extra.elapsedSeconds,
+      startedAt: status === 'skipped' ? endedAt : session.startedAt,
+      endedAt,
+      status,
+      mood: extra.mood,
+      skipReason: extra.skipReason,
     }
+    await db.sessions.add(entry)
   }
 
-  // Action: Start Focus
-  const handleStartFocus = (durationMinutes: number) => {
-    setActiveSessionDuration(durationMinutes)
-    setIsFocusActive(true)
-  }
-
-  // Action: Focus complete
   const handleFocusComplete = async (elapsedSeconds: number, mood?: SessionMood) => {
-    if (!selectedActivity) return
-
-    const newSession: Session = {
-      id: `sess-${Date.now()}`,
-      activityId: selectedActivity.id,
-      activityName: selectedActivity.name,
-      activityIcon: selectedActivity.icon,
-      activityColor: selectedActivity.accentColor,
-      categoryId: selectedActivity.categoryId,
-      plannedDurationMinutes: activeSessionDuration,
-      actualDurationSeconds: elapsedSeconds,
-      startedAt: Date.now() - elapsedSeconds * 1000,
-      endedAt: Date.now(),
-      status: 'completed',
-      mood,
-    }
-
-    await db.sessions.add(newSession)
-    if (settings.notificationsEnabled) {
-      notifySessionComplete(selectedActivity.name, activeSessionDuration)
-    }
-
-    setIsFocusActive(false)
-    setSelectedActivity(null)
-    loadData()
-  }
-
-  // Action: Focus abandon
-  const handleFocusAbandon = async (elapsedSeconds: number) => {
-    if (!selectedActivity) return
-
-    const newSession: Session = {
-      id: `sess-${Date.now()}`,
-      activityId: selectedActivity.id,
-      activityName: selectedActivity.name,
-      activityIcon: selectedActivity.icon,
-      activityColor: selectedActivity.accentColor,
-      categoryId: selectedActivity.categoryId,
-      plannedDurationMinutes: activeSessionDuration,
-      actualDurationSeconds: elapsedSeconds,
-      startedAt: Date.now() - elapsedSeconds * 1000,
-      endedAt: Date.now(),
-      status: 'abandoned',
-    }
-
-    await db.sessions.add(newSession)
-    setIsFocusActive(false)
-    setSelectedActivity(null)
-    loadData()
-  }
-
-  // Action: Focus skip
-  const handleFocusSkip = async (reason: string) => {
-    if (!selectedActivity) return
-
-    const newSession: Session = {
-      id: `sess-${Date.now()}`,
-      activityId: selectedActivity.id,
-      activityName: selectedActivity.name,
-      activityIcon: selectedActivity.icon,
-      activityColor: selectedActivity.accentColor,
-      categoryId: selectedActivity.categoryId,
-      plannedDurationMinutes: activeSessionDuration,
-      actualDurationSeconds: 0,
-      startedAt: Date.now(),
-      endedAt: Date.now(),
-      status: 'skipped',
-      skipReason: reason,
-    }
-
-    await db.sessions.add(newSession)
-    setIsFocusActive(false)
-    setSelectedActivity(null)
+    if (!active) return
+    await recordSession(active, 'completed', { elapsedSeconds, mood })
+    updateActive(null)
     await loadData()
-    // Reroll immediately
-    handleRoll()
   }
 
-  // Settings update
+  const handleFocusAbandon = async (elapsedSeconds: number) => {
+    if (!active) return
+    await recordSession(active, elapsedSeconds >= MIN_ABANDON_RECORD_SECONDS ? 'abandoned' : 'skipped', {
+      elapsedSeconds,
+    })
+    updateActive(null)
+    await loadData()
+  }
+
+  /** Quitte la session sans rien enregistrer (abandon dans les toutes premières secondes, ou session non réalisée). */
+  const handleFocusDiscard = async () => {
+    updateActive(null)
+    await loadData()
+  }
+
+  const handleFocusSkip = async (reason: string) => {
+    if (!active) return
+    const skipped = active.activity
+    await recordSession(active, 'skipped', { elapsedSeconds: 0, skipReason: reason })
+    updateActive(null)
+    const fresh = await loadData()
+    // On retire une autre activité que celle qu'on vient de passer
+    rollFrom(fresh.activities, fresh.sessions, settings.randomizerMode, skipped.id)
+  }
+
   const handleUpdateSettings = async (partial: Partial<UserSettings>) => {
     const updated = { ...settings, ...partial }
     setSettings(updated)
     await db.settings.put(updated)
   }
 
-  // Toggle activity
-  const handleToggleActivity = async (id: string, active: boolean) => {
-    await db.activities.update(id, { active })
-    setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, active } : a)))
+  const clearSelectionIf = (id: string) => {
+    if (selectedActivity?.id === id) {
+      setSelectedActivity(null)
+      setIsSpinning(false)
+    }
   }
 
-  // Delete activity
+  const handleToggleActivity = async (id: string, isActive: boolean) => {
+    await db.activities.update(id, { active: isActive })
+    setActivities((prev) => prev.map((a) => (a.id === id ? { ...a, active: isActive } : a)))
+    if (!isActive) clearSelectionIf(id)
+  }
+
   const handleDeleteActivity = async (id: string) => {
     await db.activities.delete(id)
     setActivities((prev) => prev.filter((a) => a.id !== id))
+    clearSelectionIf(id)
   }
 
-  // Save activity (create or edit)
   const handleSaveActivity = async (act: Activity) => {
     await db.activities.put(act)
+    clearSelectionIf(act.id)
     await loadData()
   }
 
-  const stats = computeStats(sessions)
+  const handleDeleteSession = async (id: string) => {
+    await db.sessions.delete(id)
+    await loadData()
+  }
 
-  return (
-    <div className="min-h-screen bg-[#07080c] text-white flex flex-col items-center justify-start antialiased selection:bg-blue-600/30">
-      <div className="w-full max-w-md min-h-screen flex flex-col relative bg-[#07080c] shadow-2xl border-x border-[#131622]/60">
-        {isFocusActive && selectedActivity ? (
-          <FocusView
-            activity={selectedActivity}
-            durationMinutes={activeSessionDuration}
-            soundEnabled={settings.soundEnabled}
-            onComplete={handleFocusComplete}
-            onAbandon={handleFocusAbandon}
-            onSkip={handleFocusSkip}
-          />
-        ) : (
-          <>
-            {tab === 'home' && (
-              <HomeView
-                activities={activities}
-                onRoll={handleRoll}
-                onManualSelectActivity={handleManualSelectActivity}
-                isSpinning={isSpinning}
-                selectedActivity={selectedActivity}
-                calculatedDuration={calculatedDuration}
-                onStartFocus={handleStartFocus}
-                onSkipAndReroll={handleRoll}
-                onSpinDone={handleSpinDone}
-                soundEnabled={settings.soundEnabled}
-                noChoiceMode={settings.noChoiceMode}
-                todayMinutes={stats.todayMinutes}
-                todaySessionsCount={stats.todaySessionsCount}
-                lastSession={sessions[0]}
-              />
-            )}
-
-
-            {tab === 'history' && <HistoryView sessions={sessions} />}
-
-            {tab === 'settings' && (
-              <SettingsView
-                activities={activities}
-                categories={categories}
-                settings={settings}
-                onUpdateSettings={handleUpdateSettings}
-                onToggleActivity={handleToggleActivity}
-                onDeleteActivity={handleDeleteActivity}
-                onSaveActivity={handleSaveActivity}
-              />
-            )}
-
-            <Navigation
-              currentTab={tab}
-              onSelectTab={setTab}
-              currentStreak={stats.currentStreakDays}
-            />
-          </>
-        )}
-      </div>
+  const shell = (children: React.ReactNode) => (
+    <div className="min-h-dvh bg-[#07080c] text-white flex flex-col items-center justify-start antialiased selection:bg-blue-600/30">
+      <div className="w-full max-w-md min-h-dvh flex flex-col relative bg-[#07080c] shadow-2xl border-x border-[#131622]/60">{children}</div>
     </div>
+  )
+
+  if (loadError) {
+    return shell(
+      <div className="m-auto p-8 text-center">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="font-semibold mb-1">Stockage local indisponible</p>
+        <p className="text-sm text-zinc-500">
+          FOCUSROLL a besoin d'IndexedDB. Quitte la navigation privée ou autorise le stockage du site, puis recharge la page.
+        </p>
+      </div>,
+    )
+  }
+
+  // Une session en cours prime sur tout le reste (elle survit au rechargement)
+  if (active) {
+    return shell(
+      <FocusView
+        session={active}
+        soundEnabled={settings.soundEnabled}
+        vibrationEnabled={settings.vibrationEnabled}
+        notificationsEnabled={settings.notificationsEnabled}
+        onChange={updateActive}
+        onComplete={handleFocusComplete}
+        onAbandon={handleFocusAbandon}
+        onDiscard={handleFocusDiscard}
+        onSkip={handleFocusSkip}
+      />,
+    )
+  }
+
+  if (!loaded) return shell(null)
+
+  return shell(
+    <>
+      {tab === 'home' && (
+        <HomeView
+          activeActivities={activeActivities}
+          hasActivities={activities.length > 0}
+          onRoll={handleRoll}
+          onManualSelectActivity={handleManualSelectActivity}
+          isSpinning={isSpinning}
+          selectedActivity={selectedActivity}
+          duration={duration}
+          onDurationChange={setDuration}
+          onStartFocus={handleStartFocus}
+          onReroll={handleReroll}
+          onSpinDone={handleSpinDone}
+          soundEnabled={settings.soundEnabled}
+          noChoiceMode={settings.noChoiceMode}
+          todayMinutes={stats.todayMinutes}
+          todaySessionsCount={stats.todaySessionsCount}
+          dailyGoalMinutes={settings.dailyGoalMinutes}
+          lastSession={sessions[0]}
+          onGoToSettings={() => setTab('settings')}
+        />
+      )}
+
+      {tab === 'history' && (
+        <HistoryView
+          sessions={sessions}
+          categories={categories}
+          dailyGoalMinutes={settings.dailyGoalMinutes}
+          onDeleteSession={handleDeleteSession}
+        />
+      )}
+
+      {tab === 'settings' && (
+        <SettingsView
+          activities={activities}
+          categories={categories}
+          settings={settings}
+          onUpdateSettings={handleUpdateSettings}
+          onToggleActivity={handleToggleActivity}
+          onDeleteActivity={handleDeleteActivity}
+          onSaveActivity={handleSaveActivity}
+          onDataRestored={() => void loadData()}
+        />
+      )}
+
+      <Navigation currentTab={tab} onSelectTab={setTab} currentStreak={stats.currentStreakDays} />
+    </>,
   )
 }
 

@@ -1,41 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import { getInstallPrompt, subscribeInstallPrompt } from '../../lib/installPrompt'
 import { Download, Smartphone, Share, PlusSquare, X } from 'lucide-react'
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-}
-
 export const InstallPromptModal: React.FC = () => {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const deferredPrompt = useSyncExternalStore(subscribeInstallPrompt, getInstallPrompt)
   const [isOpen, setIsOpen] = useState(false)
-  const [isIOS, setIsIOS] = useState(false)
-  const [isStandalone, setIsStandalone] = useState(false)
-
-  useEffect(() => {
-    // Détection si déjà installé en mode standalone
-    const standalone =
+  // Déjà installé en mode standalone ?
+  const [isStandalone] = useState(
+    () =>
       window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true
-    setIsStandalone(standalone)
-
-    // Détection iOS Safari
-    const ua = window.navigator.userAgent.toLowerCase()
-    const ios = /iphone|ipad|ipod/.test(ua)
-    setIsIOS(ios)
-
-    // Événement avant installation PWA (Android Chrome, Edge, etc.)
-    const handleBeforeInstall = (e: Event) => {
-      e.preventDefault()
-      setDeferredPrompt(e as BeforeInstallPromptEvent)
-    }
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall)
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstall)
-    }
-  }, [])
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true,
+  )
+  const [isIOS] = useState(() => /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()))
 
   if (isStandalone) {
     return null
@@ -45,10 +21,7 @@ export const InstallPromptModal: React.FC = () => {
     if (deferredPrompt) {
       deferredPrompt.prompt()
       const { outcome } = await deferredPrompt.userChoice
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null)
-        setIsOpen(false)
-      }
+      if (outcome === 'accepted') setIsOpen(false)
     } else {
       setIsOpen(true)
     }

@@ -52,5 +52,18 @@ export interface UserSettings {
   soundEnabled: boolean
   notificationsEnabled: boolean
   vibrationEnabled: boolean
+  /** Objectif quotidien de focus en minutes (0 = désactivé). */
+  dailyGoalMinutes: number
   theme: 'dark'
+}
+
+/** Session en cours, persistée pour survivre à un rechargement / une mise en veille. */
+export interface ActiveSession {
+  activity: Activity
+  durationMinutes: number
+  startedAt: number
+  pausedAt: number | null
+  pausedTotalMs: number
+  /** Renseigné quand le minuteur est arrivé au bout ou terminé manuellement. */
+  finishedAt: number | null
 }

@@ -112,22 +112,37 @@ export const DEFAULT_SETTINGS: UserSettings = {
   soundEnabled: true,
   notificationsEnabled: false,
   vibrationEnabled: true,
+  dailyGoalMinutes: 60,
   theme: 'dark',
 }
 
-export async function initializeDatabase() {
-  const categoriesCount = await db.categories.count()
-  if (categoriesCount === 0) {
-    await db.categories.bulkAdd(DEFAULT_CATEGORIES)
-  }
+let initPromise: Promise<void> | null = null
 
-  const activitiesCount = await db.activities.count()
-  if (activitiesCount === 0) {
-    await db.activities.bulkAdd(DEFAULT_ACTIVITIES)
+/**
+ * Insère les données par défaut au premier lancement.
+ * Mémoïsé : React StrictMode / plusieurs appels concurrents ne provoquent plus de BulkError.
+ */
+export function initializeDatabase(): Promise<void> {
+  if (!initPromise) {
+    initPromise = (async () => {
+      if ((await db.categories.count()) === 0) {
+        await db.categories.bulkPut(DEFAULT_CATEGORIES)
+      }
+      if ((await db.activities.count()) === 0) {
+        await db.activities.bulkPut(DEFAULT_ACTIVITIES)
+      }
+      if (!(await db.settings.get(DEFAULT_SETTINGS.id))) {
+        await db.settings.put(DEFAULT_SETTINGS)
+      }
+    })().catch((err) => {
+      initPromise = null
+      throw err
+    })
   }
+  return initPromise
+}
 
-  const existingSettings = await db.settings.get(DEFAULT_SETTINGS.id)
-  if (!existingSettings) {
-    await db.settings.put(DEFAULT_SETTINGS)
-  }
+/** Fusionne les réglages stockés avec les valeurs par défaut (nouvelles clés après une mise à jour). */
+export function withSettingsDefaults(stored: Partial<UserSettings> | undefined): UserSettings {
+  return { ...DEFAULT_SETTINGS, ...stored }
 }

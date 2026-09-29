@@ -37,7 +37,7 @@ FOCUSROLL takes the opposite approach:
 3. **PWA & Mobile-First Installation**:
    - Installable on Android (Chrome/Opera), iOS (Safari Add to Home Screen), and Desktop (Windows / macOS / Chrome standalone window).
    - High-resolution SVG and PNG icons (192x192, 512x512, apple-touch-icon).
-   - Service worker with offline cache capabilities (`sw.js`).
+   - Generated service worker (Workbox): full precache, real offline support and automatic updates.
 4. **Local Data Persistence (No Account Needed)**:
    - 100% private, instant IndexedDB storage powered by **Dexie.js**.
    - No tracking, no mandatory cloud login.
@@ -49,14 +49,14 @@ FOCUSROLL takes the opposite approach:
 
 ### Project Structure
 ```text
-FocusScroll/
+FocusRoll/
 ├── public/
 │   ├── icon.svg                 # Vector master app icon
 │   ├── pwa-192x192.png          # Android standard launcher icon
 │   ├── pwa-512x512.png          # High-res splash & install icon
 │   ├── apple-touch-icon.png     # iOS Safari home screen icon
 │   ├── manifest.json            # PWA Web App Manifest
-│   └── sw.js                    # Offline Service Worker
+│   └── (sw.js généré au build par vite-plugin-pwa)
 ├── src/
 │   ├── components/
 │   │   ├── home/                # Home screen, "What's Next", manual picker
@@ -67,11 +67,13 @@ FocusScroll/
 │   │   ├── settings/            # Activity CRUD, weight sliders, engine mode
 │   │   └── ui/                  # PWA install prompt & platform guides
 │   ├── lib/
-│   │   ├── notifications.ts     # Web notification triggers
+│   │   ├── activeSession.ts     # Session en cours persistée (minuteur par horodatage)
+│   │   ├── notifications.ts     # Notifications, vibration
+│   │   ├── useWakeLock.ts       # Écran allumé pendant le focus
 │   │   ├── randomizer/          # Pure, Smart, and Balanced engine logic
 │   │   ├── sound.ts             # Web Audio API synthesizer
 │   │   ├── statistics/          # Aggregation & streak calculations
-│   │   └── storage/             # Dexie.js (IndexedDB) database models
+│   │   └── storage/             # Dexie.js (IndexedDB) : modèles + export/import JSON
 │   ├── types/                   # TypeScript interfaces & domain contracts
 │   ├── App.tsx                  # Core state orchestrator
 │   ├── index.css                # Deep dark theme styling
@@ -89,9 +91,18 @@ npm install
 # Run development server
 npm run dev
 
+# Lint & unit tests (engine, stats, timer)
+npm run lint
+npm test
+
 # Build for production
 npm run build
 ```
+
+### Reliability notes
+- The timer is derived from timestamps (not a per-second counter) and the running session is persisted: a reload, a frozen background tab or a phone lock never loses or drifts your session. The screen is kept awake during focus (Wake Lock API).
+- A web app cannot ring while the phone is locked and JS is suspended; keep the app in the foreground for the end-of-session bell (notifications fire when the app is merely in the background).
+- Everything is stored on the device: use **Settings → Your data → Export** for backups.
 
 ---
 
@@ -122,7 +133,7 @@ FOCUSROLL inverse la démarche :
 3. **Installation PWA Mobile & Ordinateur** :
    - Installable sur Android (Chrome/Opera), iOS (Safari "Ajouter à l'écran d'accueil") et PC (fenêtre standalone épinglable à la barre des tâches).
    - Icônes vectorielles et PNG haute résolution (192x192, 512x512, apple-touch-icon).
-   - Service Worker pour fonctionnement hors-ligne garanti (`sw.js`).
+   - Service Worker généré (Workbox) : précache complet, hors-ligne réel et mise à jour automatique.
 4. **Données 100% Locales & Privées (Sans Compte)** :
    - Persistance instantanée sur IndexedDB via **Dexie.js**.
    - Aucun compte requis, aucune dépendance cloud externe pour le cœur de l'application.
@@ -132,14 +143,17 @@ FOCUSROLL inverse la démarche :
 6. **Moteur Sonore Synthétisé Intégré** :
    - Clics discrets, tonalités zen et cloche tibétaine 528Hz générés directement par le navigateur.
 
+### Fiabilité
+- Le minuteur est calculé à partir d'horodatages (pas d'un compteur à la seconde) et la session en cours est sauvegardée : un rechargement, un onglet gelé en arrière-plan ou un verrouillage du téléphone ne fait ni perdre ni dériver la session. L'écran reste allumé pendant le focus (Wake Lock).
+- Une web app ne peut pas sonner quand le téléphone est verrouillé et le JS suspendu : garde l'app au premier plan pour la cloche de fin (la notification, elle, part si l'app est simplement en arrière-plan).
+- Tout est stocké sur l'appareil : utilise **Réglages → Tes données → Exporter** pour sauvegarder.
+- Objectif quotidien, graphique 7 jours et équilibre par catégorie dans le Journal.
+
 ### Commandes Utiles
 ```bash
-# Installation des paquets
-npm install
-
-# Démarrer le serveur local
-npm run dev
-
-# Compiler pour la production
-npm run build
+npm install     # Installation des paquets
+npm run dev     # Serveur local
+npm run lint    # Lint
+npm test        # Tests unitaires (moteur, stats, minuteur)
+npm run build   # Build de production (génère aussi le service worker)
 ```

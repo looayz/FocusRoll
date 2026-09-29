@@ -13,3 +13,15 @@
 - [x] Écran SETTINGS / ACTIVITIES (création, modification, suppression, toggle actif/inactif, catégories, sons Web Audio API, notifications PWA)
 - [x] Audio synthétisé discret (clic roulette, tonalité démarrage, cloche tibétaine 528Hz fin de session)
 - [x] Build de production validé sans erreur TypeScript
+
+## Passe de revue & fiabilisation
+
+- [x] Minuteur par horodatage + session persistée (reprise après rechargement), Wake Lock, notification/vibration à la fin
+- [x] Service worker Workbox (l'ancien `sw.js` cache-first cassait l'app après un déploiement et ne fonctionnait pas hors-ligne)
+- [x] Moteur : exclusion de l'activité passée/relancée, Balanced réellement équilibré par catégorie, tests unitaires
+- [x] Stats : jours locaux (heure d'été), série record affichée, sessions "passées/abandonnées" plus comptées comme faites
+- [x] Objectif quotidien, graphique 7 jours, équilibre par catégorie, suppression de session
+- [x] Export / import JSON des données
+- [x] Formulaire d'activité corrigé (plage, champs numériques, confirmations de suppression)
+- [x] Safe areas iOS, `dvh`, saisie iOS, accessibilité de base
+- [ ] Idées suivantes : catégories personnalisables, rappels/planification, notes de session, i18n EN
