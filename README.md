@@ -47,6 +47,8 @@ FOCUSROLL takes the opposite approach:
 6. **Synthesized Web Audio Effects**:
    - Discrete clicks, lock tone, chord chime, and a 528Hz Solfeggio bell for session endings. Fully toggleable.
 
+> 📐 Full architecture, data flow and where things live: [ARCHITECTURE.md](ARCHITECTURE.md)
+
 ### Project Structure
 ```text
 FocusRoll/

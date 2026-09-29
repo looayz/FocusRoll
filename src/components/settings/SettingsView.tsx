@@ -1,7 +1,11 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Plus, Trash2, Edit2, Volume2, VolumeX, Sparkles, Sliders, Bell, Target, Vibrate, Download, Upload } from 'lucide-react'
 import type { Activity, Category, RandomizerMode, UserSettings } from '../../types'
-import { requestNotificationPermission } from '../../lib/notifications'
+import {
+  requestNotificationPermission,
+  showNotification,
+  useNotificationPermission,
+} from '../../lib/notifications'
 import { buildBackup, downloadBackup, parseBackup, restoreBackup } from '../../lib/storage/backup'
 import { InstallPromptModal } from '../ui/InstallPromptModal'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -52,7 +56,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isNew, setIsNew] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Activity | null>(null)
   const [dataMessage, setDataMessage] = useState<{ ok: boolean; text: string } | null>(null)
-  const [notifDenied, setNotifDenied] = useState(false)
+  const notifPermission = useNotificationPermission()
+  // L'utilisateur a voulu activer alors que la permission était bloquée : on active dès qu'il l'autorise
+  const wantsNotifRef = useRef(false)
+  const [testSent, setTestSent] = useState<boolean | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleOpenCreate = () => {
@@ -103,14 +110,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setEditingActivity(null)
   }
 
+  const notificationsOn = settings.notificationsEnabled && notifPermission === 'granted'
+
+  // Retour depuis les réglages du système/navigateur : dès que la permission passe à "accordée", on active.
+  useEffect(() => {
+    if (wantsNotifRef.current && notifPermission === 'granted') {
+      wantsNotifRef.current = false
+      onUpdateSettings({ notificationsEnabled: true })
+    }
+  }, [notifPermission, onUpdateSettings])
+
   const handleToggleNotifications = async () => {
-    if (settings.notificationsEnabled) {
+    setTestSent(null)
+    if (notificationsOn) {
+      wantsNotifRef.current = false
       onUpdateSettings({ notificationsEnabled: false })
       return
     }
-    const granted = await requestNotificationPermission()
-    setNotifDenied(!granted)
-    onUpdateSettings({ notificationsEnabled: granted })
+    // "default" => fenêtre d'autorisation du navigateur ; "denied" => on affiche le pas-à-pas ci-dessous
+    const result = await requestNotificationPermission()
+    wantsNotifRef.current = result !== 'granted'
+    if (result === 'granted') onUpdateSettings({ notificationsEnabled: true })
+  }
+
+  const handleTestNotification = async () => {
+    setTestSent(await showNotification('FOCUSROLL — Test', 'Les notifications fonctionnent 🎉', 'focusroll-test'))
   }
 
   const handleExport = async () => {
@@ -238,16 +262,59 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <Toggle label="Vibration" checked={settings.vibrationEnabled} onChange={() => onUpdateSettings({ vibrationEnabled: !settings.vibrationEnabled })} />
         </div>
 
-        <div className="pt-3 border-t border-[#1d2030] flex items-center justify-between gap-4">
-          <div className="text-left">
-            <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-              <Bell className="w-3.5 h-3.5 text-blue-400" /> Notification de fin
-            </span>
-            <p className="text-[11px] text-zinc-500">
-              {notifDenied ? 'Permission refusée : autorise-la dans les réglages du navigateur.' : "Si l'app est en arrière-plan quand le minuteur se termine"}
-            </p>
+        <div className="pt-3 border-t border-[#1d2030]">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-left">
+              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                <Bell className="w-3.5 h-3.5 text-blue-400" /> Notification de fin
+              </span>
+              <p className="text-[11px] text-zinc-500">Si l'app est en arrière-plan quand le minuteur se termine</p>
+            </div>
+            <Toggle label="Notification de fin" checked={notificationsOn} onChange={handleToggleNotifications} />
           </div>
-          <Toggle label="Notification de fin" checked={settings.notificationsEnabled} onChange={handleToggleNotifications} />
+
+          <p
+            className={`text-[11px] mt-2 ${
+              notifPermission === 'granted' ? 'text-emerald-400' : notifPermission === 'denied' ? 'text-rose-400' : 'text-zinc-500'
+            }`}
+            role="status"
+          >
+            {notifPermission === 'granted' && 'Autorisation accordée.'}
+            {notifPermission === 'default' && "Autorisation pas encore demandée : active l'option pour la demander."}
+            {notifPermission === 'denied' && 'Autorisation refusée : le navigateur ne la redemandera pas tout seul.'}
+            {notifPermission === 'unsupported' && "Notifications indisponibles ici. Sur iPhone, installe d'abord l'app sur l'écran d'accueil (iOS 16.4+)."}
+          </p>
+
+          {notifPermission === 'granted' && (
+            <button
+              onClick={handleTestNotification}
+              className="mt-2 text-[11px] font-semibold text-blue-400 hover:text-blue-300 cursor-pointer"
+            >
+              Envoyer une notification test
+              {testSent === true && ' ✓'}
+              {testSent === false && ' — échec'}
+            </button>
+          )}
+
+          {notifPermission === 'denied' && (
+            <div className="mt-2 rounded-2xl bg-[#141724] border border-[#1e2338] p-3 text-[11px] text-zinc-300 space-y-1.5">
+              <p className="font-semibold text-white">Pour la rétablir :</p>
+              <p>
+                <strong>Android</strong> : appui long sur l'icône FOCUSROLL → <em>Infos sur l'appli</em> → <em>Notifications</em> →
+                autoriser. (Ou Chrome ⋮ → <em>Paramètres</em> → <em>Paramètres des sites</em> → <em>Notifications</em> → looayz.github.io.)
+              </p>
+              <p>
+                <strong>iPhone</strong> : Réglages iOS → <em>Notifications</em> → FOCUSROLL → autoriser.
+              </p>
+              <p className="text-zinc-500">Reviens ensuite ici : l'option s'activera automatiquement.</p>
+              <button
+                onClick={() => void handleToggleNotifications()}
+                className="mt-1 px-3 py-2 rounded-xl bg-zinc-800 text-zinc-200 text-[11px] font-semibold hover:bg-zinc-700 cursor-pointer"
+              >
+                J'ai changé le réglage, vérifier
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
